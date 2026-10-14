@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Daily: catch herdr releases that break the plugin before users do.
+  schedule:
+    - cron: "17 6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -s sh bin/herdr-session-title tests/e2e.sh
+
+  e2e:
+    name: e2e (herdr ${{ matrix.herdr }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # min: the min_herdr_version in herdr-plugin.toml. latest: newest stable release.
+        herdr: [min, latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve herdr version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ matrix.herdr }}" = "min" ]; then
+            tag="v$(sed -n 's/^min_herdr_version = "\(.*\)"/\1/p' herdr-plugin.toml)"
+          else
+            tag=$(gh release view -R ogulcancelik/herdr --json tagName -q .tagName)
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install herdr ${{ steps.version.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ steps.version.outputs.tag }}" -R ogulcancelik/herdr \
+            -p herdr-linux-x86_64 -O "$RUNNER_TEMP/herdr"
+          chmod +x "$RUNNER_TEMP/herdr"
+
+      - name: Run end-to-end tests
+        run: HERDR="$RUNNER_TEMP/herdr" sh tests/e2e.sh
+
+  report:
+    # Open (or update) an issue when the daily run against the latest herdr fails.
+    needs: [lint, e2e]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Compatibility check failed against the latest herdr"
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number -q '.[0].number')
+          body="The daily e2e run failed: $RUN_URL"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --label compatibility --body "$body" ||
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

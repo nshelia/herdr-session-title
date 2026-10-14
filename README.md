@@ -1,8 +1,19 @@
 # herdr-session-title
 
-A [herdr](https://herdr.dev) plugin that shows each agent's **session title** in the sidebar's Agents section, so instead of five rows that all say `claude` you see `Fix login redirect`, `Arize evals ticket status`, …
+[![CI](https://github.com/nshelia/herdr-session-title/actions/workflows/ci.yml/badge.svg)](https://github.com/nshelia/herdr-session-title/actions/workflows/ci.yml)
 
-Claude Code (and most other agents) name the conversation after your first prompt and put that name in the terminal title. This plugin reads it and publishes it as pane metadata.
+A [herdr](https://github.com/ogulcancelik/herdr) plugin that shows each agent's **session title** in the sidebar's Agents section.
+
+Without it, every Claude Code pane in the sidebar reads `claude`. With it:
+
+```
+Agents                                   Agents
+● claude                                 ● Fix login redirect
+● claude                    →            ● Arize evals ticket status
+○ claude                                 ○ Recorder uptime alerts on Telegram
+```
+
+Claude Code names each conversation after your first prompt and writes that name to the terminal title. The plugin reads it and publishes it to herdr as pane metadata. It works with any agent that sets a terminal title.
 
 ## Install
 
@@ -10,17 +21,17 @@ Claude Code (and most other agents) name the conversation after your first promp
 herdr plugin install nshelia/herdr-session-title
 ```
 
-Requires `jq`.
+Requirements: herdr **0.9.3 or newer**, `jq`, macOS or Linux.
 
-## What it sets
+Titles appear the next time each agent changes state (starts or finishes a turn). To fill them in right away:
 
-For every agent pane with a real session title:
+```sh
+herdr plugin action invoke herdr-session-title.sync
+```
 
-- `--display-agent` — replaces the agent name in the default Agents row
-- `--title` — the pane title
-- `$session_title` token — for custom sidebar rows
+## Show the title next to the agent name
 
-Want to keep the agent name and show the title on a second line instead? Turn off `display-agent` and use the token:
+By default the title replaces the agent name. To keep `claude` and show the title on a second line instead:
 
 ```sh
 echo 0 > "$(herdr plugin config-dir herdr-session-title)/display-agent"
@@ -32,24 +43,44 @@ echo 0 > "$(herdr plugin config-dir herdr-session-title)/display-agent"
 rows = [["state_icon", "agent"], ["$session_title"]]
 ```
 
+Then run `herdr server reload-config`.
+
 ## Settings
 
-| File in `herdr plugin config-dir herdr-session-title` | Env var | Default | |
+Each setting is a one-line file in `herdr plugin config-dir herdr-session-title`, or an environment variable set where the herdr server starts. The environment variable wins.
+
+| File | Env var | Default | Effect |
 | --- | --- | --- | --- |
-| `display-agent` | `HERDR_SESSION_TITLE_DISPLAY_AGENT` | `1` | Replace the agent name with the title |
-| `max-length` | `HERDR_SESSION_TITLE_MAX` | `40` | Truncate long titles |
+| `display-agent` | `HERDR_SESSION_TITLE_DISPLAY_AGENT` | `1` | `1` replaces the agent name with the title. `0` keeps the agent name. |
+| `max-length` | `HERDR_SESSION_TITLE_MAX` | `40` | Longer titles are cut and end with `…`. |
 
-## When it updates
+## Troubleshooting
 
-On startup, when an agent is detected in a pane, and on every agent state change. Run the **Refresh agent session titles** action to force a full refresh.
+**A row still says `claude`.** That session has no title yet. Claude Code titles a session after the first prompt; until then the terminal title is "Claude Code", which the plugin ignores.
 
-## Local development
+**A renamed session shows the old title.** herdr doesn't notify plugins when a terminal title changes, so the plugin re-reads it on the agent's next state change. Run the sync action to update immediately.
+
+**Nothing changes at all.** Check the plugin is enabled and look at its logs:
 
 ```sh
-herdr plugin link .
-herdr plugin action invoke herdr-session-title.sync
+herdr plugin list --plugin herdr-session-title
+herdr plugin log list --plugin herdr-session-title --limit 20
 ```
+
+A `jq is required` message means `jq` isn't on the herdr server's `PATH`.
+
+## Uninstall
+
+```sh
+herdr plugin uninstall herdr-session-title
+```
+
+## More
+
+- [How it works](docs/how-it-works.md): events, the metadata it publishes, and the herdr APIs it depends on
+- [Contributing](CONTRIBUTING.md): running the tests, releasing, and keeping up with herdr
+- [Changelog](CHANGELOG.md)
 
 ## License
 
-MIT
+[MIT](LICENSE)

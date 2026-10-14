@@ -1,7 +1,7 @@
 id = "herdr-session-title"
 name = "Session Title"
 version = "0.1.0"
-min_herdr_version = "0.9.0"
+min_herdr_version = "0.9.3"
 description = "Shows each agent's session title (e.g. Claude Code's conversation name) in the sidebar's Agents section."
 platforms = ["macos", "linux"]
 
