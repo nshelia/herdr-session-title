@@ -1,0 +1,85 @@
+#!/bin/sh
+# Publish each agent's session title (the terminal title Claude Code and other
+# agents set, e.g. "Fix login redirect") as herdr pane metadata, so the
+# sidebar's Agents section shows what each session is about instead of "claude".
+#
+#   herdr-session-title event   handle one herdr event (HERDR_PLUGIN_EVENT_JSON)
+#   herdr-session-title sync    refresh every agent pane (startup / manual action)
+#
+# Settings (env vars, or files in `herdr plugin config-dir herdr-session-title`):
+#   HERDR_SESSION_TITLE_DISPLAY_AGENT=0   keep the agent name, only set title + $session_title token
+#   HERDR_SESSION_TITLE_MAX=40            truncate titles to this many characters
+
+set -u
+
+SOURCE="herdr-session-title"
+HERDR="${HERDR_BIN_PATH:-herdr}"
+
+command -v jq >/dev/null 2>&1 || { echo "herdr-session-title: jq is required" >&2; exit 0; }
+
+config() {
+  # $1 = env var name, $2 = config file name, $3 = default
+  eval "val=\${$1:-}"
+  if [ -z "$val" ] && [ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ] && [ -f "$HERDR_PLUGIN_CONFIG_DIR/$2" ]; then
+    val=$(head -n 1 "$HERDR_PLUGIN_CONFIG_DIR/$2")
+  fi
+  printf '%s' "${val:-$3}"
+}
+
+DISPLAY_AGENT=$(config HERDR_SESSION_TITLE_DISPLAY_AGENT display-agent 1)
+MAX=$(config HERDR_SESSION_TITLE_MAX max-length 40)
+
+# Titles agents show before a session has a real name.
+is_placeholder() {
+  case "$1" in
+    "" | "Claude Code" | claude | codex | "OpenAI Codex" | gemini | zsh | bash | fish | sh) return 0 ;;
+  esac
+  return 1
+}
+
+# $1 = pane JSON object (from `herdr pane get` / `herdr agent list`)
+update_pane() {
+  pane_json=$1
+  pane_id=$(printf '%s' "$pane_json" | jq -r '.pane_id // empty')
+  agent=$(printf '%s' "$pane_json" | jq -r '.agent // empty')
+  [ -n "$pane_id" ] && [ -n "$agent" ] || return 0
+
+  title=$(printf '%s' "$pane_json" | jq -r '.terminal_title_stripped // .terminal_title // empty' |
+    sed -e 's/^[^[:alnum:]/]*//' -e 's/[[:space:]]*$//')
+  is_placeholder "$title" && return 0
+
+  if [ "${#title}" -gt "$MAX" ]; then
+    title="$(printf '%s' "$title" | cut -c "1-$((MAX - 1))")…"
+  fi
+
+  # Skip when nothing changed; this also stops our own update re-triggering us.
+  current=$(printf '%s' "$pane_json" | jq -r '.title // empty')
+  [ "$current" = "$title" ] && return 0
+
+  set -- pane report-metadata "$pane_id" --source "$SOURCE" --agent "$agent" \
+    --title "$title" --token "session_title=$title"
+  if [ "$DISPLAY_AGENT" = "1" ]; then
+    set -- "$@" --display-agent "$title"
+  fi
+  "$HERDR" "$@" >/dev/null
+}
+
+sync_all() {
+  "$HERDR" agent list 2>/dev/null | jq -c '.result.agents[]?' | while IFS= read -r pane; do
+    update_pane "$pane"
+  done
+}
+
+handle_event() {
+  pane_id=$(printf '%s' "${HERDR_PLUGIN_EVENT_JSON:-}" |
+    jq -r '.data.pane_id // .data.pane.pane_id // empty' 2>/dev/null)
+  [ -n "$pane_id" ] || exit 0
+  pane=$("$HERDR" pane get "$pane_id" 2>/dev/null | jq -c '.result.pane // empty')
+  [ -n "$pane" ] && update_pane "$pane"
+}
+
+case "${1:-event}" in
+  event) handle_event ;;
+  sync) sync_all ;;
+  *) echo "usage: herdr-session-title [event|sync]" >&2; exit 2 ;;
+esac
