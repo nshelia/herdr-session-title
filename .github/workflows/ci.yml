@@ -16,7 +16,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: shellcheck
         run: shellcheck -s sh bin/herdr-session-title tests/e2e.sh
 
@@ -29,7 +29,7 @@ jobs:
         # min: the min_herdr_version in herdr-plugin.toml. latest: newest stable release.
         herdr: [min, latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve herdr version
         id: version
